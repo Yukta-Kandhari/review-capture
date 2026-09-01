@@ -12,11 +12,23 @@ function getTransporter() {
 }
 
 function baseUrl() {
-  const url =
-    process.env.PUBLIC_BASE_URL ||
-    process.env.RENDER_EXTERNAL_URL ||
-    `http://localhost:${process.env.PORT || process.env.HTTP_PORT || 3000}`;
-  return url.replace(/\/$/, "");
+  const isProd = process.env.NODE_ENV === "production" || Boolean(process.env.RENDER_EXTERNAL_URL);
+
+  const candidates = [
+    process.env.APP_URL,
+    process.env.RENDER_EXTERNAL_URL,
+    process.env.PUBLIC_BASE_URL,
+  ]
+    .filter(Boolean)
+    .map((u) => u.replace(/\/$/, ""));
+
+  for (const url of candidates) {
+    // Never put localhost links in emails when running on Render/production
+    if (isProd && url.includes("localhost")) continue;
+    return url;
+  }
+
+  return `http://localhost:${process.env.PORT || process.env.HTTP_PORT || 3000}`;
 }
 
 function fromAddress() {

@@ -225,8 +225,9 @@ app.listen(port, async () => {
 
   const check = await verifyEmailConfig();
   if (check.ok) {
-    console.log(`   ✓ SMTP verified for ${check.user}\n`);
+    console.log(`   ✓ SMTP verified for ${check.user}`);
   } else {
-    console.warn(`   ⚠ SMTP check failed: ${check.error}\n`);
+    console.warn(`   ⚠ SMTP check failed: ${check.error}`);
   }
+  console.log(`   Email sign links use: ${baseUrl()}\n`);
 });
