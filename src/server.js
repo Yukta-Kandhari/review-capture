@@ -10,18 +10,27 @@ import {
   resendReviewEmail,
 } from "./flows.js";
 import { createSession, logDecline, getSession, listDeclined, cancelSession, getActiveSessionForClient } from "./store.js";
-import { isEmailConfigured, baseUrl, verifyEmailConfig, pmEmail } from "./email.js";
+import { isEmailConfigured, emailProvider, baseUrl, verifyEmailConfig, pmEmail } from "./email.js";
 
 const port = Number(process.env.PORT || process.env.HTTP_PORT || 3000);
 const app = express();
 app.use(express.urlencoded({ extended: true }));
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
 
 function page(title, body, { refresh = false } = {}) {
   const refreshMeta = refresh ? '<meta http-equiv="refresh" content="3">' : "";
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 ${refreshMeta}
-<title>${title} — Review Capture</title>
+<title>${escapeHtml(title)} — Review Capture</title>
 <style>
   *{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:720px;margin:0 auto;padding:24px;color:#1a1a1a;background:#f8f8f8}
   h1{font-size:1.5rem;margin:0 0 8px}h2{font-size:1.1rem;margin:32px 0 12px;color:#611f69}
@@ -58,12 +67,12 @@ function activeSessionActions(session) {
   }
 
   if (session.status === "failed") {
-    return `<p class="meta warn" style="margin-top:8px">❌ Failed: ${session.error || "Unknown error"}</p>
+    return `<p class="meta warn" style="margin-top:8px">❌ Failed: ${escapeHtml(session.error || "Unknown error")}</p>
     <div class="actions">${cancelBtn}</div>`;
   }
 
   const draft = session.draftText
-    ? `<blockquote>${session.draftText}</blockquote>`
+    ? `<blockquote>${escapeHtml(session.draftText)}</blockquote>`
     : "";
 
   const emailNote = session.emailSentAt
@@ -77,7 +86,9 @@ function activeSessionActions(session) {
       <form class="inline" method="POST" action="/admin/resend/${session.id}">
         <button type="submit" class="btn btn-secondary">📧 Resend email</button>
       </form>
-      <a href="/admin/regenerate/${session.id}" class="btn btn-secondary">🔄 Regenerate & resend</a>
+      <form class="inline" method="POST" action="/admin/regenerate/${session.id}">
+        <button type="submit" class="btn btn-secondary">🔄 Regenerate &amp; resend</button>
+      </form>
       ${cancelBtn}
     </div>`;
 }
@@ -96,7 +107,7 @@ function renderDashboard(query = {}) {
   } else if (query.already === "1") {
     flash = `<div class="alert warn">⚠️ This client already has a review in progress. Cancel it first or use Resend.</div>`;
   } else if (query.error) {
-    flash = `<div class="alert warn">❌ ${decodeURIComponent(query.error)}</div>`;
+    flash = `<div class="alert warn">❌ ${escapeHtml(decodeURIComponent(query.error))}</div>`;
   }
 
   const clientCards = clients
@@ -107,9 +118,9 @@ function renderDashboard(query = {}) {
         : "";
 
       return `<div class="card">
-        <div class="client-name">${c.name} ${statusBadge}</div>
-        <div class="meta">${c.contactName} · ${c.email}</div>
-        <div class="meta">${c.projectSummary.slice(0, 100)}…</div>
+        <div class="client-name">${escapeHtml(c.name)} ${statusBadge}</div>
+        <div class="meta">${escapeHtml(c.contactName)} · ${escapeHtml(c.email)}</div>
+        <div class="meta">${escapeHtml(c.projectSummary.slice(0, 100))}…</div>
         ${
           active
             ? activeSessionActions(active)
@@ -136,8 +147,8 @@ function renderDashboard(query = {}) {
     .map((s) => {
       const c = getClientById(clients, s.clientId);
       return `<div class="card">
-        <div class="client-name">✅ ${c?.name ?? s.clientId}</div>
-        <blockquote>${s.draftText}</blockquote>
+        <div class="client-name">✅ ${escapeHtml(c?.name ?? s.clientId)}</div>
+        <blockquote>${escapeHtml(s.draftText)}</blockquote>
         <div class="meta">Signed ${new Date(s.signedAt).toLocaleString()}</div>
       </div>`;
     })
@@ -159,7 +170,7 @@ function renderDashboard(query = {}) {
     <p class="meta">Click Yes → client gets <strong>one email</strong> with their testimonial draft + sign button. You get notified only when they sign.</p>
     ${clientCards}
     ${signed.length ? `<h2>Signed reviews</h2>${signedCards}` : ""}
-    ${declined.length ? `<h2>Skipped</h2>${declined.map((d) => `<div class="card meta">${d.clientId}: ${d.reason}</div>`).join("")}` : ""}`,
+    ${declined.length ? `<h2>Skipped</h2>${declined.map((d) => `<div class="card meta">${escapeHtml(d.clientId)}: ${escapeHtml(d.reason)}</div>`).join("")}` : ""}`,
     { refresh: query.sending === "1" || hasSending }
   );
 }
@@ -203,7 +214,7 @@ app.post("/admin/resend/:sessionId", async (req, res) => {
   }
 });
 
-app.get("/admin/regenerate/:sessionId", async (req, res) => {
+app.post("/admin/regenerate/:sessionId", async (req, res) => {
   try {
     await regenerateReview(req.params.sessionId);
     res.redirect("/?regenerated=1");
@@ -217,9 +228,29 @@ app.post("/admin/skip/:clientId", (req, res) => {
   res.redirect("/");
 });
 
-app.get("/r/:sessionId/sign", async (req, res) => {
+app.get("/r/:sessionId/sign", (req, res) => {
+  const session = getSession(req.params.sessionId);
+  if (!session?.draftText) {
+    return res.status(404).send(thankYouPage("Link unavailable", "This review link is invalid or no longer available."));
+  }
+  if (session.status === "signed") {
+    return res.send(thankYouPage("Already signed!", "Your testimonial was already captured. Thank you!"));
+  }
+  res.send(page("Review testimonial", `<div class="card" style="margin-top:48px">
+    <h1>Review your testimonial</h1>
+    <blockquote>${escapeHtml(session.draftText)}</blockquote>
+    <form method="POST" action="/r/${encodeURIComponent(session.id)}/sign">
+      <button type="submit" class="btn btn-primary">✍️ Sign &amp; approve</button>
+    </form>
+  </div>`));
+});
+
+app.post("/r/:sessionId/sign", async (req, res) => {
   try {
     const result = await processClientSign(req.params.sessionId);
+    if (!result.ok) {
+      return res.status(404).send(thankYouPage("Link unavailable", "This review link is invalid or no longer available."));
+    }
     if (result.alreadyProcessed) {
       return res.send(thankYouPage("Already signed!", "Your testimonial was already captured. Thank you!"));
     }
@@ -235,7 +266,11 @@ app.get("/r/:sessionId/sign", async (req, res) => {
   }
 });
 
-app.get("/health", (_req, res) => res.json({ ok: true, email: isEmailConfigured() }));
+app.get("/health", (_req, res) => res.json({
+  ok: true,
+  email: isEmailConfigured(),
+  provider: emailProvider(),
+}));
 
 app.listen(port, async () => {
   console.log(`\n📧 Review Capture (email-only)`);
@@ -245,9 +280,9 @@ app.listen(port, async () => {
 
   const check = await verifyEmailConfig();
   if (check.ok) {
-    console.log(`   ✓ SMTP verified for ${check.user}`);
+    console.log(`   ✓ ${check.provider || emailProvider()} configured for ${check.user}`);
   } else {
-    console.warn(`   ⚠ SMTP check failed: ${check.error}`);
+    console.warn(`   ⚠ Email check failed: ${check.error}`);
   }
   console.log(`   Email sign links use: ${baseUrl()}\n`);
 });

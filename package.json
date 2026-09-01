@@ -7,7 +7,9 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "demo": "node scripts/demo-flow.js"
+    "demo": "node scripts/demo-flow.js",
+    "check": "node scripts/setup-check.js",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=18"

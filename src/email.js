@@ -58,6 +58,15 @@ function pmEmail() {
   return process.env.PM_EMAIL || process.env.SMTP_USER;
 }
 
+function escapeEmailHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 function addressObject(address) {
   const match = address.match(/^\s*(.*?)\s*<([^>]+)>\s*$/);
   return match ? { email: match[2], name: match[1] } : { email: address };
@@ -100,15 +109,18 @@ async function sendWithSendGrid(mail) {
 
 function reviewAndSignEmailHtml(client, reviewText, sessionId) {
   const signUrl = `${baseUrl()}/r/${sessionId}/sign`;
+  const contactName = escapeEmailHtml(client.contactName);
+  const clientName = escapeEmailHtml(client.name);
+  const safeReviewText = escapeEmailHtml(reviewText);
 
   return `
 <!DOCTYPE html>
 <html>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; color: #1a1a1a;">
-  <p>Hi ${client.contactName},</p>
-  <p>We loved working with <strong>${client.name}</strong> and would be grateful if you'd share a short testimonial. Based on our project together, we drafted this for you:</p>
+  <p>Hi ${contactName},</p>
+  <p>We loved working with <strong>${clientName}</strong> and would be grateful if you'd share a short testimonial. Based on our project together, we drafted this for you:</p>
   <blockquote style="border-left: 4px solid #611f69; padding-left: 16px; margin: 24px 0; font-style: italic;">
-    "${reviewText}"
+    "${safeReviewText}"
   </blockquote>
   <p>Happy with it? Click below to approve and sign. Want changes? Just reply to this email.</p>
   <p style="margin: 32px 0;">
@@ -170,8 +182,8 @@ export async function sendPmSigned(client, reviewText) {
     to: pmEmail(),
     bccSender: false,
     subject: `✅ Review signed — ${client.name}`,
-    html: `<p><strong>${client.contactName}</strong> at <strong>${client.name}</strong> signed their testimonial:</p>
-<blockquote>${reviewText}</blockquote>`,
+    html: `<p><strong>${escapeEmailHtml(client.contactName)}</strong> at <strong>${escapeEmailHtml(client.name)}</strong> signed their testimonial:</p>
+<blockquote>${escapeEmailHtml(reviewText)}</blockquote>`,
     text: `Signed by ${client.contactName} (${client.name}):\n"${reviewText}"`,
   });
 }
@@ -196,6 +208,12 @@ export function isEmailConfigured() {
   return isSendGridConfigured() || Boolean(
     process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS
   );
+}
+
+export function emailProvider() {
+  if (isSendGridConfigured()) return "SendGrid";
+  if (getTransporter()) return "SMTP";
+  return null;
 }
 
 export { baseUrl, pmEmail };
