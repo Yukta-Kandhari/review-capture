@@ -35,19 +35,22 @@ export async function initiateReviewRequest(clientRecord, session) {
 
   const draftText = await generateDraft(clientRecord);
 
+  // Send email first — only mark sent after SMTP confirms
+  const info = await sendReviewAndSignEmail(clientRecord, session.id, draftText);
+
   updateSession(
     session.id,
     {
       status: "awaiting_signature",
       draftText,
       emailSentAt: new Date().toISOString(),
+      lastMessageId: info.messageId,
+      sentTo: clientRecord.email,
     },
     { name: "review_sent" }
   );
 
-  await sendReviewAndSignEmail(clientRecord, session.id, draftText);
-
-  return { draftText };
+  return { draftText, messageId: info.messageId };
 }
 
 export async function resendReviewEmail(sessionId) {
@@ -56,8 +59,12 @@ export async function resendReviewEmail(sessionId) {
   const clientRecord = getClientById(clients, session.clientId);
   if (!clientRecord) throw new Error("Client not found");
 
-  await sendReviewAndSignEmail(clientRecord, sessionId, session.draftText);
-  updateSession(sessionId, { emailSentAt: new Date().toISOString() }, { name: "email_resent" });
+  const info = await sendReviewAndSignEmail(clientRecord, sessionId, session.draftText);
+  updateSession(
+    sessionId,
+    { emailSentAt: new Date().toISOString(), lastMessageId: info.messageId, sentTo: clientRecord.email },
+    { name: "email_resent" }
+  );
 }
 
 export async function regenerateReview(sessionId) {
@@ -69,13 +76,19 @@ export async function regenerateReview(sessionId) {
 
   const draftText = await generateDraft(clientRecord);
 
+  const info = await sendReviewAndSignEmail(clientRecord, sessionId, draftText);
+
   updateSession(
     sessionId,
-    { draftText, status: "awaiting_signature", emailSentAt: new Date().toISOString() },
+    {
+      draftText,
+      status: "awaiting_signature",
+      emailSentAt: new Date().toISOString(),
+      lastMessageId: info.messageId,
+      sentTo: clientRecord.email,
+    },
     { name: "regenerated" }
   );
-
-  await sendReviewAndSignEmail(clientRecord, sessionId, draftText);
 
   return { ok: true, draftText };
 }

@@ -10,7 +10,7 @@ import {
   resendReviewEmail,
 } from "./flows.js";
 import { createSession, logDecline, getSession, listDeclined, cancelSession, getActiveSessionForClient } from "./store.js";
-import { isEmailConfigured, baseUrl } from "./email.js";
+import { isEmailConfigured, baseUrl, verifyEmailConfig, pmEmail } from "./email.js";
 
 const port = Number(process.env.PORT || process.env.HTTP_PORT || 3000);
 const app = express();
@@ -55,7 +55,7 @@ function activeSessionActions(session) {
     : "";
 
   const emailNote = session.emailSentAt
-    ? `One email sent ${new Date(session.emailSentAt).toLocaleString()} — waiting for signature`
+    ? `Email sent ${new Date(session.emailSentAt).toLocaleString()} to <strong>${session.sentTo || "client"}</strong> (you're BCC'd at ${pmEmail()})`
     : `Processing…`;
 
   return `<p class="meta" style="margin-top:8px">${emailNote}</p>
@@ -70,9 +70,20 @@ function activeSessionActions(session) {
     </div>`;
 }
 
-function renderDashboard() {
+function renderDashboard(query = {}) {
   const { signed } = getDashboardData();
   const declined = listDeclined();
+
+  let flash = "";
+  if (query.sent === "1") {
+    flash = `<div class="alert">✅ Email sent! Check the client's inbox and your BCC copy at ${pmEmail()}.</div>`;
+  } else if (query.resent === "1") {
+    flash = `<div class="alert">✅ Email resent to client (BCC: ${pmEmail()}).</div>`;
+  } else if (query.already === "1") {
+    flash = `<div class="alert warn">⚠️ This client already has a review in progress. Cancel it first or use Resend.</div>`;
+  } else if (query.error) {
+    flash = `<div class="alert warn">❌ ${decodeURIComponent(query.error)}</div>`;
+  }
 
   const clientCards = clients
     .map((c) => {
@@ -119,12 +130,12 @@ function renderDashboard() {
     .join("");
 
   const emailStatus = isEmailConfigured()
-    ? `<div class="alert">📧 One email per client · links use ${baseUrl()}</div>`
+    ? `<div class="alert">📧 Sender BCC enabled · ${pmEmail()} gets a copy of every client email · links use ${baseUrl()}</div>`
     : `<div class="alert warn">⚠️ Set SMTP_* in .env to send emails</div>`;
 
   return page(
     "Reviews",
-    `${emailStatus}
+    `${flash}${emailStatus}
     <h1>📋 Reviews to be taken</h1>
     <p class="meta">Click Yes → client gets <strong>one email</strong> with their testimonial draft + sign button. You get notified only when they sign.</p>
     ${clientCards}
@@ -133,7 +144,7 @@ function renderDashboard() {
   );
 }
 
-app.get("/", (_req, res) => res.send(renderDashboard()));
+app.get("/", (req, res) => res.send(renderDashboard(req.query)));
 app.get("/admin", (_req, res) => res.redirect("/"));
 
 app.post("/admin/request/:clientId", async (req, res) => {
@@ -151,9 +162,10 @@ app.post("/admin/request/:clientId", async (req, res) => {
       cancelSession(session.id);
       throw err;
     }
-    res.redirect("/?sent=1");
+    res.redirect(`/?sent=1&to=${encodeURIComponent(clientRecord.email)}`);
   } catch (err) {
-    res.status(500).send(page("Error", `<div class="card warn">${err.message}</div><p><a href="/">← Back</a></p>`));
+    console.error("Send review failed:", err);
+    res.redirect(`/?error=${encodeURIComponent(err.message)}`);
   }
 });
 
@@ -205,10 +217,16 @@ app.get("/r/:sessionId/sign", async (req, res) => {
 
 app.get("/health", (_req, res) => res.json({ ok: true, email: isEmailConfigured() }));
 
-app.listen(port, () => {
+app.listen(port, async () => {
   console.log(`\n📧 Review Capture (email-only)`);
   console.log(`   Dashboard: http://localhost:${port}`);
-  console.log(`   Flow: Yes → 1 email to client → you notified on sign`);
-  console.log(`   Email configured: ${isEmailConfigured() ? "yes" : "no"}`);
-  console.log(`   Public URL: ${baseUrl()}\n`);
+  console.log(`   Flow: Yes → 1 email to client (BCC: ${pmEmail()}) → you notified on sign`);
+  console.log(`   Public URL: ${baseUrl()}`);
+
+  const check = await verifyEmailConfig();
+  if (check.ok) {
+    console.log(`   ✓ SMTP verified for ${check.user}\n`);
+  } else {
+    console.warn(`   ⚠ SMTP check failed: ${check.error}\n`);
+  }
 });

@@ -48,18 +48,38 @@ function reviewAndSignEmailHtml(client, reviewText, sessionId) {
 </html>`;
 }
 
-async function sendMail({ to, subject, html, text }) {
+async function sendMail({ to, subject, html, text, bccSender = false }) {
   const transporter = getTransporter();
   if (!transporter) throw new Error("Email not configured — set SMTP_* in .env");
-  await transporter.sendMail({ from: fromAddress(), to, subject, html, text });
+
+  await transporter.verify();
+
+  const mail = {
+    from: fromAddress(),
+    to,
+    replyTo: pmEmail(),
+    subject,
+    html,
+    text,
+  };
+  if (bccSender) {
+    mail.bcc = pmEmail();
+  }
+
+  const info = await transporter.sendMail(mail);
+  console.log(
+    `Email sent → to: ${to}${bccSender ? `, bcc: ${pmEmail()}` : ""}, messageId: ${info.messageId}`
+  );
+  return info;
 }
 
-/** One email to client: testimonial draft + sign link */
+/** One email to client: testimonial draft + sign link (sender BCC'd) */
 export async function sendReviewAndSignEmail(client, sessionId, reviewText) {
   if (!client.email) throw new Error(`No email for ${client.name}`);
   const signUrl = `${baseUrl()}/r/${sessionId}/sign`;
-  await sendMail({
+  return sendMail({
     to: client.email,
+    bccSender: true,
     subject: `Your testimonial for ${client.name} — please review & sign`,
     html: reviewAndSignEmailHtml(client, reviewText, sessionId),
     text: `Hi ${client.contactName},\n\n"${reviewText}"\n\nSign here: ${signUrl}`,
@@ -67,8 +87,9 @@ export async function sendReviewAndSignEmail(client, sessionId, reviewText) {
 }
 
 export async function sendPmSigned(client, reviewText) {
-  await sendMail({
+  return sendMail({
     to: pmEmail(),
+    bccSender: false,
     subject: `✅ Review signed — ${client.name}`,
     html: `<p><strong>${client.contactName}</strong> at <strong>${client.name}</strong> signed their testimonial:</p>
 <blockquote>${reviewText}</blockquote>`,
@@ -76,8 +97,19 @@ export async function sendPmSigned(client, reviewText) {
   });
 }
 
+export async function verifyEmailConfig() {
+  const transporter = getTransporter();
+  if (!transporter) return { ok: false, error: "SMTP not configured" };
+  try {
+    await transporter.verify();
+    return { ok: true, user: process.env.SMTP_USER };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
 export function isEmailConfigured() {
   return Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
 }
 
-export { baseUrl };
+export { baseUrl, pmEmail };
