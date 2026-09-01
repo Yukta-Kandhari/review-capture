@@ -34,10 +34,11 @@ export async function initiateReviewRequest(clientRecord, session) {
     throw new Error(`No email for ${clientRecord.name}`);
   }
 
-  updateSession(session.id, { status: "generating" }, { name: "generating" });
+  updateSession(session.id, { status: "sending" }, { name: "sending" });
 
   try {
     const draftText = await generateDraft(clientRecord);
+    console.log(`Draft ready for ${clientRecord.name}, sending email…`);
     const info = await sendReviewAndSignEmail(clientRecord, session.id, draftText);
 
     updateSession(

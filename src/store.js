@@ -8,8 +8,8 @@ const DATA_DIR = path.join(ROOT, "data");
 const STATE_FILE = path.join(DATA_DIR, "state.json");
 const REVIEWS_DIR = path.join(DATA_DIR, "reviews");
 
-const ACTIVE_STATUSES = ["generating", "awaiting_signature"];
-const GENERATING_TIMEOUT_MS = 2 * 60 * 1000;
+const ACTIVE_STATUSES = ["sending", "generating", "awaiting_signature", "failed"];
+const STALE_SENDING_MS = 45 * 1000;
 
 function ensureDirs() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -40,7 +40,7 @@ export function createSession(clientId, initiatedBy) {
     id: sessionId,
     clientId,
     initiatedBy,
-    status: "awaiting_signature",
+    status: "sending",
     createdAt: new Date().toISOString(),
     history: [{ at: new Date().toISOString(), event: "initiated", by: initiatedBy }],
   };
@@ -113,11 +113,13 @@ export function getActiveSessionForClient(clientId) {
   );
   if (!session) return null;
 
-  // Auto-ignore stale "generating" sessions (crashed mid-request)
-  if (session.status === "generating") {
-    const started = session.history.find((h) => h.name === "generating")?.at || session.createdAt;
+  // Auto-cancel stale sending/generating sessions (crashed or timed out)
+  if (session.status === "sending" || session.status === "generating") {
+    const started =
+      session.history.find((h) => h.name === "sending" || h.name === "generating")?.at ||
+      session.createdAt;
     const age = Date.now() - new Date(started).getTime();
-    if (age > GENERATING_TIMEOUT_MS) {
+    if (age > STALE_SENDING_MS) {
       cancelSession(session.id);
       return null;
     }

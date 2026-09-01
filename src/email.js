@@ -1,5 +1,7 @@
 import nodemailer from "nodemailer";
 
+const SEND_TIMEOUT_MS = 20_000;
+
 function getTransporter() {
   const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
   if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) return null;
@@ -8,7 +10,19 @@ function getTransporter() {
     port: Number(SMTP_PORT || 587),
     secure: process.env.SMTP_SECURE === "true",
     auth: { user: SMTP_USER, pass: SMTP_PASS },
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 15_000,
   });
+}
+
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms)
+    ),
+  ]);
 }
 
 function baseUrl() {
@@ -23,7 +37,6 @@ function baseUrl() {
     .map((u) => u.replace(/\/$/, ""));
 
   for (const url of candidates) {
-    // Never put localhost links in emails when running on Render/production
     if (isProd && url.includes("localhost")) continue;
     return url;
   }
@@ -76,14 +89,18 @@ async function sendMail({ to, subject, html, text, bccSender = false }) {
     mail.bcc = pmEmail();
   }
 
-  const info = await transporter.sendMail(mail);
+  const info = await withTimeout(
+    transporter.sendMail(mail),
+    SEND_TIMEOUT_MS,
+    "Email send"
+  );
+
   console.log(
     `Email sent → to: ${to}${bccSender ? `, bcc: ${pmEmail()}` : ""}, messageId: ${info.messageId}`
   );
   return info;
 }
 
-/** One email to client: testimonial draft + sign link (sender BCC'd) */
 export async function sendReviewAndSignEmail(client, sessionId, reviewText) {
   if (!client.email) throw new Error(`No email for ${client.name}`);
   const signUrl = `${baseUrl()}/r/${sessionId}/sign`;
@@ -111,7 +128,7 @@ export async function verifyEmailConfig() {
   const transporter = getTransporter();
   if (!transporter) return { ok: false, error: "SMTP not configured" };
   try {
-    await transporter.verify();
+    await withTimeout(transporter.verify(), 10_000, "SMTP verify");
     return { ok: true, user: process.env.SMTP_USER };
   } catch (err) {
     return { ok: false, error: err.message };

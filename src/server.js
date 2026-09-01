@@ -16,9 +16,11 @@ const port = Number(process.env.PORT || process.env.HTTP_PORT || 3000);
 const app = express();
 app.use(express.urlencoded({ extended: true }));
 
-function page(title, body) {
+function page(title, body, { refresh = false } = {}) {
+  const refreshMeta = refresh ? '<meta http-equiv="refresh" content="3">' : "";
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+${refreshMeta}
 <title>${title} — Review Capture</title>
 <style>
   *{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:720px;margin:0 auto;padding:24px;color:#1a1a1a;background:#f8f8f8}
@@ -50,8 +52,13 @@ function activeSessionActions(session) {
     <button type="submit" class="btn btn-no">✕ Cancel & start over</button>
   </form>`;
 
-  if (session.status === "generating") {
-    return `<p class="meta" style="margin-top:8px">⏳ Generating review & sending email…</p>
+  if (session.status === "sending" || session.status === "generating") {
+    return `<p class="meta" style="margin-top:8px">⏳ Sending email… (page refreshes automatically)</p>
+    <div class="actions">${cancelBtn}</div>`;
+  }
+
+  if (session.status === "failed") {
+    return `<p class="meta warn" style="margin-top:8px">❌ Failed: ${session.error || "Unknown error"}</p>
     <div class="actions">${cancelBtn}</div>`;
   }
 
@@ -82,6 +89,8 @@ function renderDashboard(query = {}) {
   let flash = "";
   if (query.sent === "1") {
     flash = `<div class="alert">✅ Email sent! Check the client's inbox and your BCC copy at ${pmEmail()}.</div>`;
+  } else if (query.sending === "1") {
+    flash = `<div class="alert">⏳ Sending email… this page refreshes every 3 seconds.</div>`;
   } else if (query.resent === "1") {
     flash = `<div class="alert">✅ Email resent to client (BCC: ${pmEmail()}).</div>`;
   } else if (query.already === "1") {
@@ -138,6 +147,11 @@ function renderDashboard(query = {}) {
     ? `<div class="alert">📧 Sender BCC enabled · ${pmEmail()} gets a copy of every client email · links use ${baseUrl()}</div>`
     : `<div class="alert warn">⚠️ Set SMTP_* in .env to send emails</div>`;
 
+  const hasSending = clients.some((c) => {
+    const s = getActiveSessionForClient(c.id);
+    return s && (s.status === "sending" || s.status === "generating");
+  });
+
   return page(
     "Reviews",
     `${flash}${emailStatus}
@@ -145,14 +159,15 @@ function renderDashboard(query = {}) {
     <p class="meta">Click Yes → client gets <strong>one email</strong> with their testimonial draft + sign button. You get notified only when they sign.</p>
     ${clientCards}
     ${signed.length ? `<h2>Signed reviews</h2>${signedCards}` : ""}
-    ${declined.length ? `<h2>Skipped</h2>${declined.map((d) => `<div class="card meta">${d.clientId}: ${d.reason}</div>`).join("")}` : ""}`
+    ${declined.length ? `<h2>Skipped</h2>${declined.map((d) => `<div class="card meta">${d.clientId}: ${d.reason}</div>`).join("")}` : ""}`,
+    { refresh: query.sending === "1" || hasSending }
   );
 }
 
 app.get("/", (req, res) => res.send(renderDashboard(req.query)));
 app.get("/admin", (_req, res) => res.redirect("/"));
 
-app.post("/admin/request/:clientId", async (req, res) => {
+app.post("/admin/request/:clientId", (req, res) => {
   try {
     const clientRecord = getClientById(clients, req.params.clientId);
     if (!clientRecord) return res.status(404).send("Client not found");
@@ -161,13 +176,13 @@ app.post("/admin/request/:clientId", async (req, res) => {
     if (existing) return res.redirect("/?already=1");
 
     const session = createSession(clientRecord.id, "pm");
-    try {
-      await initiateReviewRequest(clientRecord, session);
-    } catch (err) {
-      cancelSession(session.id);
-      throw err;
-    }
-    res.redirect(`/?sent=1&to=${encodeURIComponent(clientRecord.email)}`);
+
+    // Respond immediately — send email in background (Render HTTP timeout fix)
+    res.redirect("/?sending=1");
+
+    initiateReviewRequest(clientRecord, session).catch((err) => {
+      console.error("Background send failed:", err.message);
+    });
   } catch (err) {
     console.error("Send review failed:", err);
     res.redirect(`/?error=${encodeURIComponent(err.message)}`);
