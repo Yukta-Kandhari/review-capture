@@ -8,6 +8,8 @@ const DATA_DIR = path.join(ROOT, "data");
 const STATE_FILE = path.join(DATA_DIR, "state.json");
 const REVIEWS_DIR = path.join(DATA_DIR, "reviews");
 
+const ACTIVE_STATUSES = ["generating", "awaiting_signature"];
+
 function ensureDirs() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.mkdirSync(REVIEWS_DIR, { recursive: true });
@@ -37,7 +39,7 @@ export function createSession(clientId, initiatedBy) {
     id: sessionId,
     clientId,
     initiatedBy,
-    status: "awaiting_client_response",
+    status: "awaiting_signature",
     createdAt: new Date().toISOString(),
     history: [{ at: new Date().toISOString(), event: "initiated", by: initiatedBy }],
   };
@@ -103,14 +105,6 @@ export function listSessions() {
 export function listDeclined() {
   return readState().declined;
 }
-
-const ACTIVE_STATUSES = [
-  "awaiting_client_response",
-  "generating",
-  "awaiting_pm_approval",
-  "awaiting_signature",
-  "feedback_requested",
-];
 
 export function getActiveSessionForClient(clientId) {
   return listSessions().find(

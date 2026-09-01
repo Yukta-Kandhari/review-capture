@@ -1,17 +1,13 @@
 import "dotenv/config";
 import express from "express";
 import {
-  processClientLovesService,
-  processClientUnhappy,
   processClientSign,
   initiateReviewRequest,
-  sendReviewForSignature,
   regenerateReview,
   getDashboardData,
   getClientById,
   clients,
-  resendSatisfactionEmail,
-  resendSignatureEmail,
+  resendReviewEmail,
 } from "./flows.js";
 import { createSession, logDecline, getSession, listDeclined, cancelSession, getActiveSessionForClient } from "./store.js";
 import { isEmailConfigured, baseUrl } from "./email.js";
@@ -54,38 +50,28 @@ function activeSessionActions(session) {
     <button type="submit" class="btn btn-no">✕ Cancel & start over</button>
   </form>`;
 
-  if (session.status === "awaiting_client_response") {
-    const emailNote = session.emailSentAt
-      ? `Email sent ${new Date(session.emailSentAt).toLocaleString()}`
-      : `⚠️ Email may not have sent — use Resend`;
-    return `<p class="meta" style="margin-top:8px">${emailNote}</p>
-      <p class="meta">Client must click Yes or No in their email. Testing on this machine?</p>
-      <div class="actions">
-        <a href="${b}/r/${session.id}/yes" class="btn btn-yes">Simulate: Client Yes</a>
-        <a href="${b}/r/${session.id}/no" class="btn btn-no">Simulate: Client No</a>
-        <form class="inline" method="POST" action="/admin/resend/${session.id}">
-          <button type="submit" class="btn btn-secondary">📧 Resend email</button>
-        </form>
-        ${cancelBtn}
-      </div>`;
-  }
+  const draft = session.draftText
+    ? `<blockquote>${session.draftText}</blockquote>`
+    : "";
 
-  if (session.status === "awaiting_signature") {
-    return `<p class="meta" style="margin-top:8px">Waiting for client signature</p>
-      <div class="actions">
-        <a href="${b}/r/${session.id}/sign" class="btn btn-primary">✍️ Open sign link</a>
-        <form class="inline" method="POST" action="/admin/resend-sign/${session.id}">
-          <button type="submit" class="btn btn-secondary">📧 Resend sign email</button>
-        </form>
-        ${cancelBtn}
-      </div>`;
-  }
+  const emailNote = session.emailSentAt
+    ? `One email sent ${new Date(session.emailSentAt).toLocaleString()} — waiting for signature`
+    : `Processing…`;
 
-  return `<p class="meta" style="margin-top:8px">Processing…</p>${cancelBtn}`;
+  return `<p class="meta" style="margin-top:8px">${emailNote}</p>
+    ${draft}
+    <div class="actions">
+      <a href="${b}/r/${session.id}/sign" class="btn btn-primary">✍️ Open sign link</a>
+      <form class="inline" method="POST" action="/admin/resend/${session.id}">
+        <button type="submit" class="btn btn-secondary">📧 Resend email</button>
+      </form>
+      <a href="/admin/regenerate/${session.id}" class="btn btn-secondary">🔄 Regenerate & resend</a>
+      ${cancelBtn}
+    </div>`;
 }
 
 function renderDashboard() {
-  const { pending, signed, unhappy } = getDashboardData();
+  const { signed } = getDashboardData();
   const declined = listDeclined();
 
   const clientCards = clients
@@ -104,7 +90,7 @@ function renderDashboard() {
             ? activeSessionActions(active)
             : `<div class="actions">
             <form class="inline" method="POST" action="/admin/request/${c.id}">
-              <button type="submit" class="btn btn-yes">✅ Yes — request review</button>
+              <button type="submit" class="btn btn-yes">✅ Yes — send review email</button>
             </form>
             <button type="button" class="btn btn-no" onclick="document.getElementById('skip-${c.id}').style.display='block'">❌ No — skip</button>
           </div>
@@ -116,20 +102,6 @@ function renderDashboard() {
             </form>
           </div>`
         }
-      </div>`;
-    })
-    .join("");
-
-  const pendingCards = pending
-    .map((s) => {
-      const c = getClientById(clients, s.clientId);
-      return `<div class="card">
-        <div class="client-name">${c?.name ?? s.clientId} <span class="badge">needs approval</span></div>
-        <blockquote>${s.draftText}</blockquote>
-        <div class="actions">
-          <a href="/admin/approve/${s.id}" class="btn btn-primary">✅ Approve & send for signature</a>
-          <a href="/admin/regenerate/${s.id}" class="btn btn-secondary">🔄 Regenerate</a>
-        </div>
       </div>`;
     })
     .join("");
@@ -147,23 +119,20 @@ function renderDashboard() {
     .join("");
 
   const emailStatus = isEmailConfigured()
-    ? `<div class="alert">📧 Email configured · links use ${baseUrl()}</div>`
+    ? `<div class="alert">📧 One email per client · links use ${baseUrl()}</div>`
     : `<div class="alert warn">⚠️ Set SMTP_* in .env to send emails</div>`;
 
   return page(
     "Reviews",
     `${emailStatus}
     <h1>📋 Reviews to be taken</h1>
-    <p class="meta">Click Yes to email the client. They respond via email — you approve drafts here or via email link.</p>
+    <p class="meta">Click Yes → client gets <strong>one email</strong> with their testimonial draft + sign button. You get notified only when they sign.</p>
     ${clientCards}
-    ${pending.length ? `<h2>Pending your approval</h2>${pendingCards}` : ""}
-    ${unhappy.length ? `<h2>Needs reorientation (${unhappy.length})</h2><p class="meta">Clients sent to Google Form — loop back when ready.</p>` : ""}
     ${signed.length ? `<h2>Signed reviews</h2>${signedCards}` : ""}
     ${declined.length ? `<h2>Skipped</h2>${declined.map((d) => `<div class="card meta">${d.clientId}: ${d.reason}</div>`).join("")}` : ""}`
   );
 }
 
-// ─── Admin dashboard ────────────────────────────────────────────────────────
 app.get("/", (_req, res) => res.send(renderDashboard()));
 app.get("/admin", (_req, res) => res.redirect("/"));
 
@@ -173,9 +142,7 @@ app.post("/admin/request/:clientId", async (req, res) => {
     if (!clientRecord) return res.status(404).send("Client not found");
 
     const existing = getActiveSessionForClient(clientRecord.id);
-    if (existing) {
-      return res.redirect("/?already=1");
-    }
+    if (existing) return res.redirect("/?already=1");
 
     const session = createSession(clientRecord.id, "pm");
     try {
@@ -197,17 +164,17 @@ app.post("/admin/cancel/:sessionId", (req, res) => {
 
 app.post("/admin/resend/:sessionId", async (req, res) => {
   try {
-    await resendSatisfactionEmail(req.params.sessionId);
+    await resendReviewEmail(req.params.sessionId);
     res.redirect("/?resent=1");
   } catch (err) {
     res.status(500).send(page("Error", `<div class="card warn">${err.message}</div><p><a href="/">← Back</a></p>`));
   }
 });
 
-app.post("/admin/resend-sign/:sessionId", async (req, res) => {
+app.get("/admin/regenerate/:sessionId", async (req, res) => {
   try {
-    await resendSignatureEmail(req.params.sessionId);
-    res.redirect("/?resent=1");
+    await regenerateReview(req.params.sessionId);
+    res.redirect("/?regenerated=1");
   } catch (err) {
     res.status(500).send(page("Error", `<div class="card warn">${err.message}</div><p><a href="/">← Back</a></p>`));
   }
@@ -216,89 +183,6 @@ app.post("/admin/resend-sign/:sessionId", async (req, res) => {
 app.post("/admin/skip/:clientId", (req, res) => {
   logDecline(req.params.clientId, req.body.reason || "No reason given", "pm");
   res.redirect("/");
-});
-
-app.get("/admin/review/:sessionId", (req, res) => {
-  const session = getSession(req.params.sessionId);
-  if (!session?.draftText) return res.status(404).send("Session not found");
-  const c = getClientById(clients, session.clientId);
-  res.send(
-    page(
-      "Review draft",
-      `<div class="card">
-        <h1>${c?.name}</h1>
-        <blockquote>${session.draftText}</blockquote>
-        <div class="actions">
-          <a href="/admin/approve/${session.id}" class="btn btn-primary">✅ Approve & send for signature</a>
-          <a href="/admin/regenerate/${session.id}" class="btn btn-secondary">🔄 Regenerate</a>
-          <a href="/" class="btn btn-secondary">← Dashboard</a>
-        </div>
-      </div>`
-    )
-  );
-});
-
-app.get("/admin/approve/:sessionId", async (req, res) => {
-  try {
-    await sendReviewForSignature(req.params.sessionId);
-    res.send(
-      thankYouPage(
-        "Sent! 📧",
-        "Signature email sent to the client. You'll get an email when they sign."
-      )
-    );
-  } catch (err) {
-    res.status(500).send(page("Error", `<div class="card warn">${err.message}</div>`));
-  }
-});
-
-app.get("/admin/regenerate/:sessionId", async (req, res) => {
-  try {
-    await regenerateReview(req.params.sessionId);
-    res.redirect(`/admin/review/${req.params.sessionId}`);
-  } catch (err) {
-    res.status(500).send(page("Error", `<div class="card warn">${err.message}</div>`));
-  }
-});
-
-// ─── Client email link handlers ─────────────────────────────────────────────
-app.get("/r/:sessionId/yes", async (req, res) => {
-  try {
-    const result = await processClientLovesService(req.params.sessionId);
-    if (result.alreadyProcessed) {
-      return res.send(thankYouPage("Already received!", "We already got your response. Thank you!"));
-    }
-    res.send(
-      thankYouPage(
-        "Thank you! ❤️",
-        "We're preparing your testimonial. You'll receive an email shortly to review and sign it."
-      )
-    );
-  } catch (err) {
-    console.error(err);
-    res.status(500).send(thankYouPage("Something went wrong", "Please reply to the email directly."));
-  }
-});
-
-app.get("/r/:sessionId/no", async (req, res) => {
-  try {
-    const result = await processClientUnhappy(req.params.sessionId);
-    const formUrl = result.formUrl || "#";
-    if (result.alreadyProcessed) {
-      return res.send(thankYouPage("Already received!", "We already got your feedback. Thank you!"));
-    }
-    res.send(`<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>We'd love your feedback</title>
-<meta http-equiv="refresh" content="3;url=${formUrl}">
-<style>body{font-family:-apple-system,sans-serif;max-width:480px;margin:80px auto;text-align:center;padding:24px;}
-a{color:#611f69;}</style></head>
-<body><h1>Thank you for your honesty</h1>
-<p>Redirecting you to our feedback form…</p>
-<p><a href="${formUrl}">Click here if you're not redirected</a></p></body></html>`);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send(thankYouPage("Something went wrong", "Please reply to the email directly."));
-  }
 });
 
 app.get("/r/:sessionId/sign", async (req, res) => {
@@ -324,9 +208,7 @@ app.get("/health", (_req, res) => res.json({ ok: true, email: isEmailConfigured(
 app.listen(port, () => {
   console.log(`\n📧 Review Capture (email-only)`);
   console.log(`   Dashboard: http://localhost:${port}`);
+  console.log(`   Flow: Yes → 1 email to client → you notified on sign`);
   console.log(`   Email configured: ${isEmailConfigured() ? "yes" : "no"}`);
-  console.log(`   Public URL for email links: ${baseUrl()}`);
-  if (baseUrl().includes("localhost")) {
-    console.log(`   ⚠ Use ngrok for client email links: ngrok http ${port}\n`);
-  }
+  console.log(`   Public URL: ${baseUrl()}\n`);
 });

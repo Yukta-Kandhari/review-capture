@@ -1,10 +1,10 @@
 {
   "clients": [
     {
-      "id": "acme-corp",
-      "name": "Acme Corp",
-      "contactName": "Jane Smith",
-      "email": "pulkitkhanna1@gmail.com",
+      "id": "Hive-sphere",
+      "name": "Hive Sphere",
+      "contactName": "Yukta Kandhari",
+      "email": "Yukta.Kandhari@gmail.com",
       "projectSummary": "Built a 12-episode branded podcast series. Delivered on time, 2M+ downloads in first quarter.",
       "outcomes": ["2M+ downloads", "Featured in AdWeek", "Renewed for Season 2"],
       "tone": "professional, enthusiastic"

@@ -5,9 +5,8 @@ Capture client reviews entirely over email. No Slack required.
 ## Flow
 
 ```
-You (dashboard) → Yes → 📧 Email to client (Y/N)
-                              → Yes → Claude draft → you approve → 📧 Sign email → Done
-                              → No  → Google Form → loop back
+You (dashboard) → Yes → 📧 ONE email to client (draft + sign button)
+                              → Client signs → 📧 You get notified
          → No  → log reason
 ```
 
@@ -19,7 +18,7 @@ cp .env.example .env   # fill in SMTP + PM_EMAIL
 npm start
 ```
 
-Open **http://localhost:3000** — your dashboard to pick clients and approve drafts.
+Open **http://localhost:3000** — pick a client and click Yes to send one review email.
 
 ## Email setup (Gmail)
 
@@ -57,8 +56,5 @@ ngrok http 3000
 
 | When | To | What |
 |------|-----|------|
-| You click Yes | Client | "Do you like our service?" Y/N |
-| Client clicks Yes | You (`PM_EMAIL`) | Draft ready — approve link |
-| You approve | Client | Sign testimonial link |
-| Client signs | You | Confirmation with full text |
-| Client clicks No | You | Alert + client redirected to Google Form |
+| You click Yes | Client | **One email** — testimonial draft + Sign button |
+| Client signs | You | Confirmation with full signed text |
