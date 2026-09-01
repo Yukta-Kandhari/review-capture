@@ -145,7 +145,7 @@ function renderDashboard(query = {}) {
 
   const emailStatus = isEmailConfigured()
     ? `<div class="alert">📧 Sender BCC enabled · ${pmEmail()} gets a copy of every client email · links use ${baseUrl()}</div>`
-    : `<div class="alert warn">⚠️ Set SMTP_* in .env to send emails</div>`;
+    : `<div class="alert warn">⚠️ Configure SendGrid or SMTP in the environment to send emails</div>`;
 
   const hasSending = clients.some((c) => {
     const s = getActiveSessionForClient(c.id);

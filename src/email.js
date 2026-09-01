@@ -2,6 +2,12 @@ import nodemailer from "nodemailer";
 
 const SEND_TIMEOUT_MS = 20_000;
 
+function isSendGridConfigured() {
+  return Boolean(
+    process.env.SENDGRID_API_KEY && process.env.EMAIL_FROM && process.env.PM_EMAIL
+  );
+}
+
 function getTransporter() {
   const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
   if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) return null;
@@ -52,6 +58,46 @@ function pmEmail() {
   return process.env.PM_EMAIL || process.env.SMTP_USER;
 }
 
+function addressObject(address) {
+  const match = address.match(/^\s*(.*?)\s*<([^>]+)>\s*$/);
+  return match ? { email: match[2], name: match[1] } : { email: address };
+}
+
+async function sendWithSendGrid(mail) {
+  const personalization = { to: [{ email: mail.to }] };
+  if (mail.bcc) personalization.bcc = [{ email: mail.bcc }];
+
+  const payload = {
+    personalizations: [personalization],
+    from: addressObject(mail.from),
+    subject: mail.subject,
+    content: [
+      { type: "text/plain", value: mail.text },
+      { type: "text/html", value: mail.html },
+    ],
+  };
+  if (mail.replyTo) payload.reply_to = { email: mail.replyTo };
+
+  const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.SENDGRID_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    const detail = result.errors?.map((error) => error.message).join("; ");
+    throw new Error(`SendGrid API error (${response.status}): ${detail || response.statusText}`);
+  }
+  return {
+    messageId: response.headers.get("x-message-id") || `sendgrid-${Date.now()}`,
+  };
+}
+
 function reviewAndSignEmailHtml(client, reviewText, sessionId) {
   const signUrl = `${baseUrl()}/r/${sessionId}/sign`;
 
@@ -74,9 +120,6 @@ function reviewAndSignEmailHtml(client, reviewText, sessionId) {
 }
 
 async function sendMail({ to, subject, html, text, bccSender = false }) {
-  const transporter = getTransporter();
-  if (!transporter) throw new Error("Email not configured — set SMTP_* in .env");
-
   const mail = {
     from: fromAddress(),
     to,
@@ -89,11 +132,20 @@ async function sendMail({ to, subject, html, text, bccSender = false }) {
     mail.bcc = pmEmail();
   }
 
-  const info = await withTimeout(
-    transporter.sendMail(mail),
-    SEND_TIMEOUT_MS,
-    "Email send"
-  );
+  let info;
+  if (isSendGridConfigured()) {
+    info = await sendWithSendGrid(mail);
+  } else {
+    const transporter = getTransporter();
+    if (!transporter) {
+      throw new Error("Email not configured — set SENDGRID_API_KEY + EMAIL_FROM + PM_EMAIL or SMTP_*");
+    }
+    info = await withTimeout(
+      transporter.sendMail(mail),
+      SEND_TIMEOUT_MS,
+      "Email send"
+    );
+  }
 
   console.log(
     `Email sent → to: ${to}${bccSender ? `, bcc: ${pmEmail()}` : ""}, messageId: ${info.messageId}`
@@ -125,8 +177,13 @@ export async function sendPmSigned(client, reviewText) {
 }
 
 export async function verifyEmailConfig() {
+  if (isSendGridConfigured()) {
+    return { ok: true, user: process.env.EMAIL_FROM, provider: "SendGrid" };
+  }
   const transporter = getTransporter();
-  if (!transporter) return { ok: false, error: "SMTP not configured" };
+  if (!transporter) {
+    return { ok: false, error: "Set SENDGRID_API_KEY + EMAIL_FROM + PM_EMAIL or SMTP_*" };
+  }
   try {
     await withTimeout(transporter.verify(), 10_000, "SMTP verify");
     return { ok: true, user: process.env.SMTP_USER };
@@ -136,7 +193,9 @@ export async function verifyEmailConfig() {
 }
 
 export function isEmailConfigured() {
-  return Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+  return isSendGridConfigured() || Boolean(
+    process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS
+  );
 }
 
 export { baseUrl, pmEmail };

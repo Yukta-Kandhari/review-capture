@@ -28,7 +28,7 @@ export async function initiateReviewRequest(clientRecord, session) {
   const { isEmailConfigured } = await import("./email.js");
 
   if (!isEmailConfigured()) {
-    throw new Error("Email not configured — set SMTP_* in .env");
+    throw new Error("Email not configured — set SENDGRID_API_KEY + EMAIL_FROM + PM_EMAIL or SMTP_*");
   }
   if (!clientRecord.email) {
     throw new Error(`No email for ${clientRecord.name}`);

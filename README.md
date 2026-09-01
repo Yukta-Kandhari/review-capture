@@ -14,13 +14,29 @@ You (dashboard) → Yes → 📧 ONE email to client (draft + sign button)
 
 ```bash
 npm install
-cp .env.example .env   # fill in SMTP + PM_EMAIL
+cp .env.example .env   # fill in SendGrid + PM_EMAIL (or SMTP locally)
 npm start
 ```
 
 Open **http://localhost:3000** — pick a client and click Yes to send one review email.
 
-## Email setup (Gmail)
+## Email setup (Render free tier — SendGrid)
+
+1. Create a SendGrid account.
+2. Verify a Single Sender for testing, or authenticate your domain for production.
+3. Create an API key with Mail Send permission.
+4. Add to `.env` or your Render environment:
+
+```bash
+SENDGRID_API_KEY=SG.your-api-key
+EMAIL_FROM="Your Name <your-verified-sender@example.com>"
+PM_EMAIL=you@gmail.com
+```
+
+SendGrid uses HTTPS, which works on Render's free tier. Gmail SMTP does not because
+Render blocks outbound SMTP ports on free web services.
+
+## Optional local email setup (Gmail SMTP)
 
 1. Enable 2FA on your Google account
 2. Create an [App Password](https://myaccount.google.com/apppasswords)
