@@ -1,0 +1,31 @@
+{
+  "clients": [
+    {
+      "id": "acme-corp",
+      "name": "Acme Corp",
+      "contactName": "Jane Smith",
+      "email": "pulkitkhanna1@gmail.com",
+      "projectSummary": "Built a 12-episode branded podcast series. Delivered on time, 2M+ downloads in first quarter.",
+      "outcomes": ["2M+ downloads", "Featured in AdWeek", "Renewed for Season 2"],
+      "tone": "professional, enthusiastic"
+    },
+    {
+      "id": "bright-path",
+      "name": "Bright Path Media",
+      "contactName": "Alex Rivera",
+      "email": "pulkitkhanna1@gmail.com",
+      "projectSummary": "UGC content pipeline and Instagram Reels strategy. 40% increase in engagement.",
+      "outcomes": ["40% engagement lift", "15 viral reels", "Reduced production cost by 30%"],
+      "tone": "casual, authentic"
+    },
+    {
+      "id": "northstar-audio",
+      "name": "Northstar Audio",
+      "contactName": "Priya Patel",
+      "email": "pulkitkhanna1@gmail.com",
+      "projectSummary": "Full audio drama production — scripting, casting, sound design, and distribution.",
+      "outcomes": ["Top 10 fiction podcast", "4.9 star rating", "500K subscribers"],
+      "tone": "warm, storytelling"
+    }
+  ]
+}
