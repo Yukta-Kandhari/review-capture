@@ -64,8 +64,6 @@ async function sendMail({ to, subject, html, text, bccSender = false }) {
   const transporter = getTransporter();
   if (!transporter) throw new Error("Email not configured — set SMTP_* in .env");
 
-  await transporter.verify();
-
   const mail = {
     from: fromAddress(),
     to,

@@ -17,7 +17,7 @@ function fillTemplate(template, client) {
 
 export async function generateReview(client) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
+  if (!apiKey || apiKey.includes("your-key") || apiKey.includes("sk-ant-your")) {
     throw new Error("ANTHROPIC_API_KEY is not set");
   }
 
@@ -25,7 +25,8 @@ export async function generateReview(client) {
   const prompt = fillTemplate(template, client);
   const model = process.env.CLAUDE_MODEL || "claude-sonnet-4-20250514";
 
-  const anthropic = new Anthropic({ apiKey });
+  const anthropic = new Anthropic({ apiKey, timeout: 20_000 });
+
   const message = await anthropic.messages.create({
     model,
     max_tokens: 512,

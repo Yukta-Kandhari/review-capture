@@ -9,6 +9,7 @@ const STATE_FILE = path.join(DATA_DIR, "state.json");
 const REVIEWS_DIR = path.join(DATA_DIR, "reviews");
 
 const ACTIVE_STATUSES = ["generating", "awaiting_signature"];
+const GENERATING_TIMEOUT_MS = 2 * 60 * 1000;
 
 function ensureDirs() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -107,9 +108,22 @@ export function listDeclined() {
 }
 
 export function getActiveSessionForClient(clientId) {
-  return listSessions().find(
+  const session = listSessions().find(
     (s) => s.clientId === clientId && ACTIVE_STATUSES.includes(s.status)
   );
+  if (!session) return null;
+
+  // Auto-ignore stale "generating" sessions (crashed mid-request)
+  if (session.status === "generating") {
+    const started = session.history.find((h) => h.name === "generating")?.at || session.createdAt;
+    const age = Date.now() - new Date(started).getTime();
+    if (age > GENERATING_TIMEOUT_MS) {
+      cancelSession(session.id);
+      return null;
+    }
+  }
+
+  return session;
 }
 
 export function cancelSession(sessionId) {

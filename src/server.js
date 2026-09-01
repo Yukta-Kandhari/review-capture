@@ -50,6 +50,11 @@ function activeSessionActions(session) {
     <button type="submit" class="btn btn-no">✕ Cancel & start over</button>
   </form>`;
 
+  if (session.status === "generating") {
+    return `<p class="meta" style="margin-top:8px">⏳ Generating review & sending email…</p>
+    <div class="actions">${cancelBtn}</div>`;
+  }
+
   const draft = session.draftText
     ? `<blockquote>${session.draftText}</blockquote>`
     : "";

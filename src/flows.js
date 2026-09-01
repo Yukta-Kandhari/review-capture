@@ -12,6 +12,9 @@ import { sendReviewAndSignEmail, sendPmSigned } from "./email.js";
 const clients = loadClients();
 
 async function generateDraft(clientRecord) {
+  if (!process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY.includes("your-key")) {
+    return generateReviewFallback(clientRecord);
+  }
   try {
     return await generateReview(clientRecord);
   } catch (err) {
@@ -33,24 +36,27 @@ export async function initiateReviewRequest(clientRecord, session) {
 
   updateSession(session.id, { status: "generating" }, { name: "generating" });
 
-  const draftText = await generateDraft(clientRecord);
+  try {
+    const draftText = await generateDraft(clientRecord);
+    const info = await sendReviewAndSignEmail(clientRecord, session.id, draftText);
 
-  // Send email first — only mark sent after SMTP confirms
-  const info = await sendReviewAndSignEmail(clientRecord, session.id, draftText);
+    updateSession(
+      session.id,
+      {
+        status: "awaiting_signature",
+        draftText,
+        emailSentAt: new Date().toISOString(),
+        lastMessageId: info.messageId,
+        sentTo: clientRecord.email,
+      },
+      { name: "review_sent" }
+    );
 
-  updateSession(
-    session.id,
-    {
-      status: "awaiting_signature",
-      draftText,
-      emailSentAt: new Date().toISOString(),
-      lastMessageId: info.messageId,
-      sentTo: clientRecord.email,
-    },
-    { name: "review_sent" }
-  );
-
-  return { draftText, messageId: info.messageId };
+    return { draftText, messageId: info.messageId };
+  } catch (err) {
+    updateSession(session.id, { status: "failed", error: err.message }, { name: "failed" });
+    throw err;
+  }
 }
 
 export async function resendReviewEmail(sessionId) {
